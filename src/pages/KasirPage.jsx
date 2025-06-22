@@ -18,7 +18,7 @@ const useMediaQuery = (query) => {
 };
 
 export default function KasirPage() {
-    const { employee } = useAuth();
+    const { employee, refreshEmployee } = useAuth();
     const [allProducts, setAllProducts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -31,6 +31,7 @@ export default function KasirPage() {
     const isMobile = useMediaQuery('(max-width: 768px)');
     const [categoryFilter, setCategoryFilter] = useState('all');
     const [brandFilter, setBrandFilter] = useState('all');
+    const [retryCount, setRetryCount] = useState(0);
 
     useEffect(() => {
         const fetchProducts = async () => {
@@ -42,13 +43,25 @@ export default function KasirPage() {
                     .select('*')
                     .order('name', { ascending: true });
                 
-                if (error) throw error;
+                if (error) {
+                    // Handle RLS error dengan retry
+                    if (error.code === 'PGRST301' && retryCount < 3) {
+                        setRetryCount(prev => prev + 1);
+                        setTimeout(() => {
+                            refreshEmployee();
+                            fetchProducts();
+                        }, 1000);
+                        return;
+                    }
+                    throw error;
+                }
                 
                 if (!data || data.length === 0) {
                     setError('Tidak ada produk tersedia. Hubungi admin.');
                 }
                 
                 setAllProducts(data || []);
+                setRetryCount(0); // Reset retry count on success
             } catch (err) {
                 console.error('Error fetching products:', err);
                 setError(`Gagal memuat produk: ${err.message}`);
@@ -57,8 +70,10 @@ export default function KasirPage() {
             }
         };
         
-        fetchProducts();
-    }, []);
+        if (employee) {
+            fetchProducts();
+        }
+    }, [employee, refreshEmployee, retryCount]);
     
     useEffect(() => {
         const subtotalOriginal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
@@ -129,7 +144,13 @@ export default function KasirPage() {
                 p_total_details: totals 
             });
             
-            if (error) throw error;
+            if (error) {
+                // Handle RLS error specifically
+                if (error.code === 'PGRST301') {
+                    throw new Error('Akses ditolak. Silakan refresh halaman atau login ulang.');
+                }
+                throw error;
+            }
             
             if (data.status === 'error') {
                 throw new Error(data.message || 'Transaksi gagal');
@@ -147,6 +168,11 @@ export default function KasirPage() {
         }
     };
 
+    const handleRetryLoad = () => {
+        setError(null);
+        window.location.reload();
+    };
+
     return (
         <div className="flex flex-col h-screen bg-gray-100">
             <ErrorAlert error={error} onClose={() => setError(null)} />
@@ -158,6 +184,21 @@ export default function KasirPage() {
                     </span>
                 </div>
             </header>
+            
+            {/* Error State with Retry */}
+            {error && (
+                <div className="m-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
+                    <strong className="font-bold">Error!</strong>
+                    <span className="block sm:inline"> {error}</span>
+                    <button 
+                        onClick={handleRetryLoad}
+                        className="mt-2 bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700"
+                    >
+                        Retry
+                    </button>
+                </div>
+            )}
+            
             <main className="flex-grow p-4 md:flex md:gap-4 overflow-y-hidden">
                 <section className={`w-full md:w-2/3 flex flex-col gap-4 ${isMobile && mobileView !== 'products' ? 'hidden' : ''}`}>
                     <div className="bg-white p-4 rounded-lg shadow flex flex-wrap gap-4 items-center sticky top-0 z-10">
