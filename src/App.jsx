@@ -2,8 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthProvider';
 import ProtectedRoute from './components/ProtectedRoute';
-
-// Import pages
+import Header from './components/Header';
 import LoginPage from './pages/LoginPage';
 import SignUpPage from './pages/SignUpPage';
 import KasirPage from './pages/KasirPage';
@@ -11,76 +10,25 @@ import OwnerPage from './pages/OwnerPage';
 import AccountPage from './pages/AccountPage';
 import TestPage from './pages/TestPage';
 
-
-// Layout dengan navigasi sederhana untuk development
+// Layout utama aplikasi yang sekarang lebih simpel dan KONSISTEN
 function AppLayout({ children }) {
-    const { employee, signOut } = useAuth();
-    
-    if (!employee) return <>{children}</>;
-    
     return (
-        <div className="flex flex-col h-screen bg-gray-100">
-            {/* Development Navigation Bar */}
-            <nav className="bg-white shadow-md p-2 flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                    <span className="text-sm font-bold">
-                        {employee.name} ({employee.role})
-                    </span>
-                    
-                    {/* Navigation Links berdasarkan role */}
-                    <div className="flex gap-2">
-                        <a 
-                            href="/kasir" 
-                            className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                        >
-                            Kasir
-                        </a>
-                        
-                        {(employee.role === 'owner' || employee.role === 'kasir_senior') && (
-                            <a 
-                                href="/owner" 
-                                className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
-                            >
-                                Owner/Admin
-                            </a>
-                        )}
-                        
-                        <a 
-                            href="/account" 
-                            className="px-3 py-1 text-sm bg-gray-600 text-white rounded hover:bg-gray-700"
-                        >
-                            Akun
-                        </a>
-                    </div>
-                </div>
-                
-                <button 
-                    onClick={() => signOut().then(() => window.location.href = '/login')}
-                    className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
-                >
-                    Logout
-                </button>
-            </nav>
-            
-            <div className="flex-grow overflow-y-auto">
+        <div className="flex flex-col min-h-screen bg-gray-50">
+            <Header />
+            <main className="flex-grow">
                 {children}
-            </div>
+            </main>
         </div>
     );
 }
 
-// Komponen untuk redirect berdasarkan role
+// Komponen untuk redirect berdasarkan role setelah login
 function HomeRedirect() {
     const { employee } = useAuth();
-    
     if (!employee) return <Navigate to="/login" />;
-    
-    // Redirect berdasarkan role
-    if (employee.role === 'owner') {
+    if (employee.role === 'owner' || employee.role === 'kasir_senior') {
         return <Navigate to="/owner" />;
     }
-    
-    // Default redirect ke kasir
     return <Navigate to="/kasir" />;
 }
 
@@ -89,55 +37,19 @@ export default function App() {
         <Router>
             <AuthProvider>
                 <Routes>
-                    {/* Public Routes */}
+                    {/* Rute Publik */}
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/signup" element={<SignUpPage />} />
                     
-                    {/* Protected Routes - Kasir (semua role bisa akses) */}
-                    <Route path="/kasir" element={
-                        <ProtectedRoute>
-                            <AppLayout>
-                                <KasirPage />
-                            </AppLayout>
-                        </ProtectedRoute>
-                    } />
+                    {/* Rute yang Dilindungi */}
+                    <Route path="/kasir" element={<ProtectedRoute><AppLayout><KasirPage /></AppLayout></ProtectedRoute>} />
+                    <Route path="/owner" element={<ProtectedRoute allowedRoles={['owner', 'kasir_senior']}><AppLayout><OwnerPage /></AppLayout></ProtectedRoute>} />
+                    <Route path="/account" element={<ProtectedRoute><AppLayout><AccountPage /></AppLayout></ProtectedRoute>} />
+                    <Route path="/test" element={<ProtectedRoute><AppLayout><TestPage /></AppLayout></ProtectedRoute>} />
                     
-                    {/* Protected Routes - Owner/Admin only */}
-                    <Route path="/owner" element={
-                        <ProtectedRoute allowedRoles={['owner', 'kasir_senior']}>
-                            <AppLayout>
-                                <OwnerPage />
-                            </AppLayout>
-                        </ProtectedRoute>
-                    } />
-                    
-                    {/* Protected Routes - Account (semua role bisa akses) */}
-                    <Route path="/account" element={
-                        <ProtectedRoute>
-                            <AppLayout>
-                                <AccountPage />
-                            </AppLayout>
-                        </ProtectedRoute>
-                    } />
-                    
-                    {/* Default Route - redirect berdasarkan role */}
-                    <Route path="/" element={
-                        <ProtectedRoute>
-                            <HomeRedirect />
-                        </ProtectedRoute>
-                    } />
-                    
-                    {/* 404 Route */}
+                    {/* Rute default */}
+                    <Route path="/" element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
                     <Route path="*" element={<Navigate to="/" />} />
-                    <Route path="/test" element={
-    <ProtectedRoute>
-        <AppLayout>
-            <TestPage />
-        </AppLayout>
-    </ProtectedRoute>
-} />
-                
-                
                 </Routes>
             </AuthProvider>
         </Router>
