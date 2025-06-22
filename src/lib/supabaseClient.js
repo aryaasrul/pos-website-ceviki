@@ -2,7 +2,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 // Ganti dengan URL dan Kunci Anon dari proyek Supabase Anda.
-const supabaseUrl = 'https://yaggkepfrbkdfxzgitjd.supabase.co'
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlhZ2drZXBmcmJrZGZ4emdpdGpkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAzODkwMTMsImV4cCI6MjA2NTk2NTAxM30.kv_wj7H-6yyoMRZbOsFDQ7PfvVoQtjMbTKzSQ0ucpic'
+const supabaseUrl = 'https://eeyalsjlsglyrefnfuoc.supabase.co'
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVleWFsc2psc2dseXJlZm5mdW9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTA1OTMyMDYsImV4cCI6MjA2NjE2OTIwNn0.wGd1bLGPwYw3zdMyrbm6847Xuz-PBlOaLg6kPX1DB_k'
 
 export const supabase = createClient(supabaseUrl, supabaseKey)
