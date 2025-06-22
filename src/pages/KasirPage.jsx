@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../contexts/AuthProvider';
 import ProductGroupCard from '../components/ProductGroupCard';
 import Cart from '../components/Cart';
 import PaymentModal from '../components/PaymentModal';
+import ErrorAlert from '../components/ErrorAlert';
 
 const useMediaQuery = (query) => {
     const [matches, setMatches] = useState(window.matchMedia(query).matches);
@@ -16,8 +18,10 @@ const useMediaQuery = (query) => {
 };
 
 export default function KasirPage() {
+    const { employee } = useAuth();
     const [allProducts, setAllProducts] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
     const [cart, setCart] = useState([]);
     const [totals, setTotals] = useState({ subtotal: 0, discount: 0, total: 0 });
     const [transactionDiscount, setTransactionDiscount] = useState({ type: 'fixed', value: 0 });
@@ -29,13 +33,31 @@ export default function KasirPage() {
     const [brandFilter, setBrandFilter] = useState('all');
 
     useEffect(() => {
-        setLoading(true);
-        supabase.from('v_product_stock').select('*').order('name', { ascending: true })
-            .then(({ data, error }) => {
-                if (error) console.error('Error fetching products:', error);
-                else setAllProducts(data);
+        const fetchProducts = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                const { data, error } = await supabase
+                    .from('v_product_stock')
+                    .select('*')
+                    .order('name', { ascending: true });
+                
+                if (error) throw error;
+                
+                if (!data || data.length === 0) {
+                    setError('Tidak ada produk tersedia. Hubungi admin.');
+                }
+                
+                setAllProducts(data || []);
+            } catch (err) {
+                console.error('Error fetching products:', err);
+                setError(`Gagal memuat produk: ${err.message}`);
+            } finally {
                 setLoading(false);
-            });
+            }
+        };
+        
+        fetchProducts();
     }, []);
     
     useEffect(() => {
@@ -67,21 +89,59 @@ export default function KasirPage() {
     const uniqueCategories = useMemo(() => [...new Set(allProducts.map(p => p.jenis_barang))], [allProducts]);
     const uniqueBrands = useMemo(() => [...new Set(allProducts.map(p => p.merk))], [allProducts]);
 
-    const handleAddToCart = (p) => setCart(prev => { const existing = prev.find(i => i.id === p.id); if (existing) return prev.map(i => i.id === p.id ? { ...i, quantity: i.quantity + 1 } : i); return [...prev, { ...p, quantity: 1, discount: { type: 'fixed', value: 0 } }]; });
-    const handleQuantityChange = (id, qty) => { if (qty < 1) return handleRemoveFromCart(id); setCart(prev => prev.map(i => i.id === id ? { ...i, quantity: qty } : i)); };
+    const handleAddToCart = (p) => setCart(prev => { 
+        const existing = prev.find(i => i.id === p.id); 
+        if (existing) return prev.map(i => i.id === p.id ? { ...i, quantity: i.quantity + 1 } : i); 
+        return [...prev, { ...p, quantity: 1, discount: { type: 'fixed', value: 0 } }]; 
+    });
+    
+    const handleQuantityChange = (id, qty) => { 
+        if (qty < 1) return handleRemoveFromCart(id); 
+        setCart(prev => prev.map(i => i.id === id ? { ...i, quantity: qty } : i)); 
+    };
+    
     const handleRemoveFromCart = (id) => setCart(prev => prev.filter(i => i.id !== id));
-    const handleItemDiscountChange = (id, type, value) => { const numVal = Number(value) || 0; setCart(prev => prev.map(item => item.id === id ? { ...item, discount: { type, value: numVal } } : item)); };
-    const handleTransactionDiscountChange = (type, value) => { const numVal = Number(value) || 0; setTransactionDiscount({ type, value: numVal }); };
+    
+    const handleItemDiscountChange = (id, type, value) => { 
+        const numVal = Number(value) || 0; 
+        setCart(prev => prev.map(item => item.id === id ? { ...item, discount: { type, value: numVal } } : item)); 
+    };
+    
+    const handleTransactionDiscountChange = (type, value) => { 
+        const numVal = Number(value) || 0; 
+        setTransactionDiscount({ type, value: numVal }); 
+    };
     
     const handleConfirmPayment = async (customerDetails) => {
+        if (!employee) {
+            setError('Sesi login tidak valid. Silakan login ulang.');
+            return;
+        }
+
         setIsSubmitting(true);
+        setError(null);
+        
         try {
-            const { data, error } = await supabase.rpc('create_new_order', { p_kasir_id: 1, p_cart_items: cart, p_customer_details: customerDetails, p_total_details: totals });
-            if (error || data.status === 'error') throw new Error(error?.message || data.message);
+            const { data, error } = await supabase.rpc('create_new_order', { 
+                p_kasir_id: employee.id,
+                p_cart_items: cart, 
+                p_customer_details: customerDetails, 
+                p_total_details: totals 
+            });
+            
+            if (error) throw error;
+            
+            if (data.status === 'error') {
+                throw new Error(data.message || 'Transaksi gagal');
+            }
+            
             alert(`Transaksi berhasil! ID: ${data.transaction_id}`);
-            setCart([]); setTransactionDiscount({ type: 'fixed', value: 0 }); setIsPaymentModalOpen(false);
+            setCart([]); 
+            setTransactionDiscount({ type: 'fixed', value: 0 }); 
+            setIsPaymentModalOpen(false);
         } catch (err) {
-            alert(`Gagal: ${err.message}`);
+            console.error('Transaction error:', err);
+            setError(`Transaksi gagal: ${err.message}`);
         } finally {
             setIsSubmitting(false);
         }
@@ -89,21 +149,74 @@ export default function KasirPage() {
 
     return (
         <div className="flex flex-col h-screen bg-gray-100">
-            <header className="bg-blue-600 text-white p-4"><h1 className="text-xl font-bold">POS - Mode Development</h1></header>
+            <ErrorAlert error={error} onClose={() => setError(null)} />
+            <header className="bg-blue-600 text-white p-4">
+                <div className="flex justify-between items-center">
+                    <h1 className="text-xl font-bold">POS - Kasir</h1>
+                    <span className="text-sm">
+                        {employee ? `${employee.name} (${employee.role})` : 'Loading...'}
+                    </span>
+                </div>
+            </header>
             <main className="flex-grow p-4 md:flex md:gap-4 overflow-y-hidden">
                 <section className={`w-full md:w-2/3 flex flex-col gap-4 ${isMobile && mobileView !== 'products' ? 'hidden' : ''}`}>
                     <div className="bg-white p-4 rounded-lg shadow flex flex-wrap gap-4 items-center sticky top-0 z-10">
-                        <select onChange={(e) => setCategoryFilter(e.target.value)} className="p-2 border rounded-md text-sm"><option value="all">Semua Kategori</option>{uniqueCategories.map(cat => <option key={cat} value={cat} className="capitalize">{cat.replace('_', ' ')}</option>)}</select>
-                        <select onChange={(e) => setBrandFilter(e.target.value)} className="p-2 border rounded-md text-sm"><option value="all">Semua Merk</option>{uniqueBrands.map(brand => <option key={brand} value={brand}>{brand}</option>)}</select>
+                        <select onChange={(e) => setCategoryFilter(e.target.value)} className="p-2 border rounded-md text-sm">
+                            <option value="all">Semua Kategori</option>
+                            {uniqueCategories.map(cat => <option key={cat} value={cat} className="capitalize">{cat.replace('_', ' ')}</option>)}
+                        </select>
+                        <select onChange={(e) => setBrandFilter(e.target.value)} className="p-2 border rounded-md text-sm">
+                            <option value="all">Semua Merk</option>
+                            {uniqueBrands.map(brand => <option key={brand} value={brand}>{brand}</option>)}
+                        </select>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 overflow-y-auto pr-2 pb-16">
-                        {loading ? <p>Memuat produk...</p> : (groupedAndFilteredProducts.map(group => (<ProductGroupCard key={group.groupKey} group={group} onAddToCart={handleAddToCart} />)))}
+                        {loading ? (
+                            <p className="col-span-full text-center text-gray-500">Memuat produk...</p>
+                        ) : (
+                            groupedAndFilteredProducts.map(group => (
+                                <ProductGroupCard key={group.groupKey} group={group} onAddToCart={handleAddToCart} />
+                            ))
+                        )}
                     </div>
                 </section>
-                <Cart cartItems={cart} totals={totals} onQuantityChange={handleQuantityChange} onRemoveItem={handleRemoveFromCart} onItemDiscountChange={handleItemDiscountChange} onTransactionDiscountChange={handleTransactionDiscountChange} className={`w-full md:w-1/3 ${isMobile && mobileView !== 'cart' ? 'hidden' : ''}`} isMobile={isMobile} onCloseCart={() => setMobileView('products')} onCheckout={() => setIsPaymentModalOpen(true)} />
-                {isMobile && (<button onClick={() => setMobileView(v => v === 'products' ? 'cart' : 'products')} className="fixed bottom-4 right-4 bg-blue-600 text-white rounded-full p-4 shadow-lg z-20">{mobileView === 'products' ? (<div className="relative"><span>🛒</span>{cart.length > 0 && <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">{cart.length}</span>}</div>) : '📦'}</button>)}
+                <Cart 
+                    cartItems={cart} 
+                    totals={totals} 
+                    onQuantityChange={handleQuantityChange} 
+                    onRemoveItem={handleRemoveFromCart} 
+                    onItemDiscountChange={handleItemDiscountChange} 
+                    onTransactionDiscountChange={handleTransactionDiscountChange} 
+                    className={`w-full md:w-1/3 ${isMobile && mobileView !== 'cart' ? 'hidden' : ''}`} 
+                    isMobile={isMobile} 
+                    onCloseCart={() => setMobileView('products')} 
+                    onCheckout={() => setIsPaymentModalOpen(true)} 
+                />
+                {isMobile && (
+                    <button 
+                        onClick={() => setMobileView(v => v === 'products' ? 'cart' : 'products')} 
+                        className="fixed bottom-4 right-4 bg-blue-600 text-white rounded-full p-4 shadow-lg z-20"
+                    >
+                        {mobileView === 'products' ? (
+                            <div className="relative">
+                                <span>🛒</span>
+                                {cart.length > 0 && (
+                                    <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                                        {cart.length}
+                                    </span>
+                                )}
+                            </div>
+                        ) : '📦'}
+                    </button>
+                )}
             </main>
-            <PaymentModal isOpen={isPaymentModalOpen} onClose={() => setIsPaymentModalOpen(false)} totalAmount={totals.total} onConfirmPayment={handleConfirmPayment} isSubmitting={isSubmitting} />
+            <PaymentModal 
+                isOpen={isPaymentModalOpen} 
+                onClose={() => setIsPaymentModalOpen(false)} 
+                totalAmount={totals.total} 
+                onConfirmPayment={handleConfirmPayment} 
+                isSubmitting={isSubmitting} 
+            />
         </div>
     );
 }
