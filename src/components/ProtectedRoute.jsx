@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthProvider';
 
 export default function ProtectedRoute({ children, allowedRoles = [] }) {
     const { user, employee, loading, error, refreshEmployee } = useAuth();
+    const [waitTime, setWaitTime] = useState(0);
 
     // Auto refresh employee data jika ada error RLS
     useEffect(() => {
@@ -11,6 +12,28 @@ export default function ProtectedRoute({ children, allowedRoles = [] }) {
             refreshEmployee();
         }
     }, [user, employee, loading, error, refreshEmployee]);
+
+    // Timer untuk timeout - FIX: Pindahkan useState ke atas
+    // Di bagian useEffect untuk timer, update menjadi:
+    useEffect(() => {
+        let timer;
+        if (!employee && user && !loading) {
+            timer = setInterval(() => {
+                setWaitTime(prev => {
+                    const newTime = prev + 1;
+                    // Force error setelah 10 detik
+                    if (newTime > 10) {
+                        window.location.reload();
+                    }
+                    return newTime;
+                });
+            }, 1000);
+        }
+        
+        return () => {
+            if (timer) clearInterval(timer);
+        };
+    }, [employee, user, loading]);
 
     // Tampilkan loading state
     if (loading) {
@@ -55,16 +78,6 @@ export default function ProtectedRoute({ children, allowedRoles = [] }) {
 
     // Tunggu sampai data employee loaded (dengan timeout)
     if (!employee) {
-        const [waitTime, setWaitTime] = React.useState(0);
-        
-        React.useEffect(() => {
-            const timer = setInterval(() => {
-                setWaitTime(prev => prev + 1);
-            }, 1000);
-            
-            return () => clearInterval(timer);
-        }, []);
-        
         // Jika sudah tunggu 5 detik, tampilkan option untuk skip
         if (waitTime > 5) {
             return (

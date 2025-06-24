@@ -18,7 +18,9 @@ export function AuthProvider({ children }) {
                 setLoading(false);
             } else {
                 setUser(session?.user ?? null);
-                // Jangan set loading false di sini, tunggu employee data
+                if (!session?.user) {
+                    setLoading(false);
+                }
             }
         });
 
@@ -28,7 +30,6 @@ export function AuthProvider({ children }) {
                 setUser(session?.user ?? null);
                 setError(null);
                 
-                // Force refresh employee data on auth change
                 if (session?.user) {
                     await fetchEmployeeData(session.user.id);
                 } else {
@@ -41,47 +42,54 @@ export function AuthProvider({ children }) {
         return () => authListener.subscription.unsubscribe();
     }, []);
 
-    // Function terpisah untuk fetch employee data dengan retry
+    // Function untuk fetch employee data
     const fetchEmployeeData = async (userId, retryCount = 0) => {
         try {
             console.log('Fetching employee data for user:', userId);
             
-            // Method 1: Direct query (jika RLS disabled untuk employees)
+            // Query langsung tanpa RLS check
             const { data, error } = await supabase
                 .from('employees')
                 .select('*')
                 .eq('user_id', userId)
                 .single();
             
+            console.log('Query result:', { data, error });
+            
             if (error) {
                 console.error("Error fetching employee:", error);
                 
-                // Jika error karena RLS, coba dengan RPC
-                if (error.code === 'PGRST301' || error.message.includes('permission')) {
-                    console.log('Trying RPC method...');
+                // Jika not found, buat employee baru
+                if (error.code === 'PGRST116') {
+                    console.log('Employee not found, creating new one...');
                     
-                    // Method 2: Gunakan RPC function
-                    const { data: rpcData, error: rpcError } = await supabase
-                        .rpc('get_current_user_info');
+                    // Get user email from auth
+                    const { data: { user: authUser } } = await supabase.auth.getUser();
                     
-                    if (rpcError) {
-                        throw rpcError;
+                    // Create new employee
+                    const { data: newEmployee, error: insertError } = await supabase
+                        .from('employees')
+                        .insert([{
+                            user_id: userId,
+                            username: authUser?.email || 'user@tokolbj.com',
+                            email: authUser?.email || 'user@tokolbj.com',
+                            name: 'New User',
+                            role: 'kasir',
+                            pin: '000000',
+                            active: true
+                        }])
+                        .select()
+                        .single();
+                    
+                    if (insertError) {
+                        console.error('Error creating employee:', insertError);
+                        throw insertError;
                     }
                     
-                    if (rpcData && Object.keys(rpcData).length > 0) {
-                        setEmployee(rpcData);
-                        setError(null);
-                        setLoading(false);
-                        return;
-                    }
-                }
-                
-                // Retry logic
-                if (retryCount < 3) {
-                    console.log(`Retrying... attempt ${retryCount + 1}`);
-                    setTimeout(() => {
-                        fetchEmployeeData(userId, retryCount + 1);
-                    }, 1000);
+                    console.log('New employee created:', newEmployee);
+                    setEmployee(newEmployee);
+                    setError(null);
+                    setLoading(false);
                     return;
                 }
                 
@@ -89,42 +97,31 @@ export function AuthProvider({ children }) {
             }
             
             if (!data) {
-                setError('Data karyawan tidak ditemukan. Hubungi admin.');
+                console.log('No employee data returned');
+                setError('Data karyawan tidak ditemukan.');
                 setLoading(false);
                 return;
             }
             
             if (!data.active) {
                 setError('Akun Anda tidak aktif. Hubungi admin.');
-                await signOut();
+                setLoading(false);
                 return;
             }
             
-            console.log('Employee data loaded:', data);
+            console.log('Employee data loaded successfully:', data);
             setEmployee(data);
             setError(null);
             setLoading(false);
             
         } catch (err) {
-            console.error("Unexpected error:", err);
-            
-            // Jika semua gagal, set error tapi tetap biarkan user masuk
-            if (retryCount >= 3) {
-                setError('Gagal memuat data profil. Beberapa fitur mungkin terbatas.');
-                // Set employee minimal agar tidak stuck di loading
-                setEmployee({
-                    id: 0,
-                    user_id: userId,
-                    name: 'User',
-                    role: 'kasir',
-                    active: true
-                });
-                setLoading(false);
-            }
+            console.error("Unexpected error in fetchEmployeeData:", err);
+            setError(`Error: ${err.message}`);
+            setLoading(false);
         }
     };
 
-    // Efek terpisah untuk mengambil profil
+    // Efek untuk fetch employee saat user berubah
     useEffect(() => {
         if (!user) {
             setEmployee(null);
@@ -140,13 +137,11 @@ export function AuthProvider({ children }) {
             const { error } = await supabase.auth.signOut();
             if (error) throw error;
             
-            // Clear all state
             setUser(null);
             setEmployee(null);
             setError(null);
             setLoading(false);
             
-            // Redirect to login
             window.location.href = '/login';
         } catch (error) {
             console.error('Error signing out:', error);
@@ -156,6 +151,7 @@ export function AuthProvider({ children }) {
     const refreshEmployee = async () => {
         if (user) {
             setLoading(true);
+            setError(null);
             await fetchEmployeeData(user.id);
         }
     };
